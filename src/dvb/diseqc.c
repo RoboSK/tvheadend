@@ -67,23 +67,37 @@ int diseqc_send_msg (int fd, fe_sec_voltage_t v, struct diseqc_cmd **cmd,
 	if ((err = ioctl(fd, FE_SET_VOLTAGE, v)))
 		return err;
 
-	msleep(15);
+	msleep(30);
+
 	while (*cmd) {
 		if ((err = ioctl(fd, FE_DISEQC_SEND_MASTER_CMD, &(*cmd)->cmd)))
 			return err;
 
 		msleep((*cmd)->wait);
+		msleep(100);
+
+		/* Do it again just to be sure. */
+		if ((err = ioctl(fd, FE_DISEQC_SEND_MASTER_CMD, &(*cmd)->cmd)))
+			return err;
+
+		msleep((*cmd)->wait);
+		msleep(100);
+
 		cmd++;
 	}
-
-	msleep(15);
 
 	if ((err = ioctl(fd, FE_DISEQC_SEND_BURST, b)))
 		return err;
 
-	msleep(15);
+	msleep(30);
 
-	return ioctl(fd, FE_SET_TONE, t);
+	if ((err = ioctl(fd, FE_SET_TONE, t)))
+		return err;
+
+	msleep(30);
+
+	return err;
+
 }
 
 
