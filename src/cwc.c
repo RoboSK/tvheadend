@@ -57,6 +57,7 @@ typedef enum {
   CARD_IRDETO,
   CARD_DRE,
   CARD_CONAX,
+  CARD_CRYPTOWORKS,
   CARD_SECA,
   CARD_VIACCESS,
   CARD_NAGRA,
@@ -280,6 +281,7 @@ static void cwc_service_destroy(th_descrambler_t *td);
 static void cwc_detect_card_type(cwc_t *cwc);
 void cwc_emm_conax(cwc_t *cwc, uint8_t *data, int len);
 void cwc_emm_irdeto(cwc_t *cwc, uint8_t *data, int len);
+void cwc_emm_cryptoworks(cwc_t *cwc, uint8_t *data, int len); // 001
 void cwc_emm_dre(cwc_t *cwc, uint8_t *data, int len);
 void cwc_emm_seca(cwc_t *cwc, uint8_t *data, int len);
 void cwc_emm_viaccess(cwc_t *cwc, uint8_t *data, int len);
@@ -679,6 +681,11 @@ cwc_detect_card_type(cwc_t *cwc)
   case 0x0b:
     cwc->cwc_card_type = CARD_CONAX;
     tvhlog(LOG_INFO, "cwc", "%s: conax card",
+	   cwc->cwc_hostname);
+    break;
+  case 0x0D:
+    cwc->cwc_card_type = CARD_CRYPTOWORKS;
+    tvhlog(LOG_INFO, "cwc", "%s: cryptoworks card",
 	   cwc->cwc_hostname);
     break;
   case 0x01:
@@ -1203,6 +1210,9 @@ cwc_emm(uint8_t *data, int len)
       case CARD_SECA:
 	cwc_emm_seca(cwc, data, len);
 	break;
+      case CARD_CRYPTOWORKS:
+	cwc_emm_cryptoworks(cwc, data, len);
+	break;
       case CARD_VIACCESS:
 	cwc_emm_viaccess(cwc, data, len);
 	break;
@@ -1270,6 +1280,180 @@ cwc_emm_irdeto(cwc_t *cwc, uint8_t *data, int len)
     }
   }
   
+  if (match)
+    cwc_send_msg(cwc, data, len, 0, 1);
+}
+
+
+/**
+ * cryptoworks emm handler
+ * inspired by opensasc-ng + oscam
+ */
+// duplicity with "sort_nanos" ?
+static void
+emm_cryptoworks_sort_nanos(unsigned char *dest, const unsigned char *src, int32_t len)
+{
+	int32_t w=0, c=-1, j=0;
+	while(1) {
+		int32_t n=0x100;
+		for(j=0; j<len;) {
+			int32_t l=src[j+1]+2;
+				if(src[j]==c) {
+					if(w+l>len) {
+						tvhlog(LOG_INFO, "cwc", "Cryptoworks EMM: sort_nanos - sanity check failed...");
+            memset(dest,0,len); // zero out everything
+						return;
+					}
+					memcpy(&dest[w],&src[j],l);
+				w+=l;
+			} else if(src[j]>c && src[j]<n)
+				n=src[j];
+			j+=l;
+		}
+		if(n==0x100) break;
+		c=n;
+	}
+}
+
+void
+cwc_emm_cryptoworks(cwc_t *cwc, uint8_t *data, int len)
+{
+
+  static unsigned char emm_cryptoworks_global[512];
+  static int32_t emm_cryptoworks_global_len = 0;
+
+  int emm_len;
+
+  int match = 0;
+
+/*
+  if (len>500) {
+    return;
+  }
+*/
+
+  switch (data[0])
+    {
+
+    // SHARED+serial
+    case 0x84:
+        // Card Serial
+        if (memcmp(&data[5],&cwc->cwc_ua[3],4) != 0) return;
+          // nano
+          if (data[3] == 0xA9 && data[4] == 0xFF && data[12] == 0x80 && data[13] == 0x04) {
+            // data changed
+            if (memcmp(emm_cryptoworks_global, data, len) != 0 || emm_cryptoworks_global_len != len) {
+              memcpy(emm_cryptoworks_global, data, len);
+              emm_cryptoworks_global_len=len;
+              // TEST
+              // tvhlog(LOG_INFO, "cwc", "data: %02X.%02X.%02X.%02X.%02X *** %02X.%02X.%02X.%02X", data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8]);
+              // tvhlog(LOG_INFO, "cwc", "cwc->cwc_ua: %02X.%02X.%02X.%02X", cwc->cwc_ua[3], cwc->cwc_ua[4], cwc->cwc_ua[5], cwc->cwc_ua[6]);
+            }
+          } else {
+          emm_cryptoworks_global_len=0;
+          }
+    break;
+
+    // UNIQUE
+    case 0x82:
+        // Card Serial
+        if (memcmp(&data[5],&cwc->cwc_ua[3],5) != 0) return;
+          // nano
+          if (data[3] == 0xA9 && data[4] == 0xFF && data[13] == 0x80 && data[14] == 0x05) {
+            match = 1;
+          }
+    break;
+
+    // SHARED
+    case 0x86:
+        // if (data[3] == 0xA9 && data[4] == 0xFF && data[5] == 0x83 && data[6] == 0x01 && data[8] == 0x84) {
+          // tvhlog(LOG_INFO, "cwc", "Cryptoworks EMM-S: GLOBAL 0x86 v 0x84 not sent.");
+        // }
+
+        if (data[3] == 0xA9 && data[4] == 0xFF && data[5] == 0x83 && data[6] == 0x01 && data[8] == 0x85) {
+
+            // no 0x84 nano
+            if (!emm_cryptoworks_global_len) return;
+
+            // TEST
+            // tvhlog(LOG_INFO, "cwc", "len: %02X / len(+12): %02X / emm_cryptoworks_global_len: %02X", len, len+12, emm_cryptoworks_global_len);
+            // tvhlog(LOG_INFO, "cwc", "emm_cryptoworks_global-start: %02X.%02X.%02X.%02X.%02X *** %02X.%02X.%02X.%02X", emm_cryptoworks_global[0], emm_cryptoworks_global[1], emm_cryptoworks_global[2], emm_cryptoworks_global[3], emm_cryptoworks_global[4], emm_cryptoworks_global[5], emm_cryptoworks_global[6], emm_cryptoworks_global[7], emm_cryptoworks_global[8]);
+            // tvhlog(LOG_INFO, "cwc", "cwc->cwc_ua: %02X.%02X.%02X.%02X", cwc->cwc_ua[3], cwc->cwc_ua[4], cwc->cwc_ua[5], cwc->cwc_ua[6]);
+
+            // Card Serial
+            if (memcmp(&emm_cryptoworks_global[5],&cwc->cwc_ua[3],4) != 0) return;
+
+            emm_len=len-5 + emm_cryptoworks_global_len-12;
+            unsigned char *tmp;
+
+            tmp = malloc(emm_len);
+              if (tmp == NULL) {
+                free(tmp);
+                return;
+              }
+            memset(tmp, 0, emm_len);
+
+            unsigned char *assembled_EMM=malloc(emm_len+12);
+            memcpy(tmp,&data[5], len-5);
+            memcpy(tmp+len-5,&emm_cryptoworks_global[12],emm_cryptoworks_global_len-12);
+            memcpy(assembled_EMM,emm_cryptoworks_global,12);
+            emm_cryptoworks_sort_nanos(assembled_EMM+12,tmp,emm_len);
+
+            assembled_EMM[1]=((emm_len+9)>>8) | 0x70;
+            assembled_EMM[2]=(emm_len+9) & 0xFF;
+            //copy back the assembled emm in the working buffer(data)
+            memcpy(data, assembled_EMM, emm_len+12);
+            len=emm_len+12;
+
+            free(tmp);
+            free(assembled_EMM);
+
+            emm_cryptoworks_global_len=0;
+
+              if(assembled_EMM[11] != emm_len) { // sanity check
+              // error in emm assembly
+              tvhlog(LOG_INFO, "cwc", "Error assembling Cryptoworks EMM-S");
+              return;
+              }  
+
+            match = 1;
+
+        }
+    break;
+
+    // GLOBAL
+    case 0x88:
+    case 0x89:
+        if (data[3] == 0xA9 && data[4] == 0xFF && data[8] == 0x83 && data[9] == 0x01) {
+          match = 1;
+        }
+    break;
+
+    // UNKNOWN
+    case 0x8F:
+			switch(data[4])
+      {
+				case 0x44:
+          // GLOBAL
+					match = 1;
+        break;
+				case 0x48:
+					// SHARED		
+					match = 1;
+        break;
+				case 0x42:
+					// UNIQUE
+					match = 1;
+        break;
+			}
+    break;
+
+    // NOT KNOWN
+    default:
+        // tvhlog(LOG_INFO, "cwc", "Cryptoworks EMM: UNKNOWN %02X", data[0]);
+    break;
+    }
+
   if (match)
     cwc_send_msg(cwc, data, len, 0, 1);
 }
