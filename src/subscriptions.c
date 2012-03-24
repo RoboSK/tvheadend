@@ -258,8 +258,6 @@ subscription_input(void *opauqe, streaming_message_t *sm)
   }
 
   if(s->ths_state != SUBSCRIPTION_GOT_SERVICE) {
-    if (!s->ths_input.st_clone && sm->sm_type == SMT_MPEGTS)
-      return;
     streaming_msg_free(sm);
     return;
   }
@@ -297,8 +295,6 @@ subscription_create(int weight, const char *name, streaming_target_t *st,
 
   streaming_target_init(&s->ths_input, direct ? subscription_input_direct : 
 			subscription_input, s, reject);
-  if (flags & SUBSCRIPTION_RAW_MPEGTS)
-    s->ths_input.st_clone = 0;  
 
   s->ths_weight            = weight;
   s->ths_title             = strdup(name);
@@ -362,11 +358,9 @@ subscription_create_from_channel(channel_t *ch, unsigned int weight,
  */
 th_subscription_t *
 subscription_create_from_service(service_t *t, const char *name,
-				   streaming_target_t *st, int flags,
-				   int direct)
+				   streaming_target_t *st, int flags)
 {
-  th_subscription_t *s = subscription_create(INT32_MAX, name, st,
-							flags, direct);
+  th_subscription_t *s = subscription_create(INT32_MAX, name, st, flags, 1);
   source_info_t si;
   int r;
 
@@ -479,7 +473,7 @@ subscription_dummy_join(const char *id, int first)
 
   st = calloc(1, sizeof(streaming_target_t));
   streaming_target_init(st, dummy_callback, NULL, 0);
-  subscription_create_from_service(t, "dummy", st, 0, 1);
+  subscription_create_from_service(t, "dummy", st, 0);
 
   tvhlog(LOG_NOTICE, "subscription", 
 	 "Dummy join %s ok", id);

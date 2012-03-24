@@ -164,9 +164,8 @@ tvheadend.chconf = function()
 	    dataIndex: 'chid',
 	    width: 50,
 	    renderer: function(value, metadata, record, row, col, store) {
-	    url1 = 'playlist/channelid/' + value
-	    url2 = 'stream/ts-channelid/' + value
-	    return "<a href=\"javascript:tvheadend.VLC('"+url1+"')\">Play</a>|<a href=\""+url2+"\">MTS</a>"
+	    url = 'playlist/channelid/' + value
+	    return "<a href=\"javascript:tvheadend.VLC('"+url+"')\">Play</a>"
 	    }
 	},
 	{
