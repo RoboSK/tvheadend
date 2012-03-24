@@ -488,6 +488,36 @@ htsp_method_async(htsp_connection_t *htsp, htsmsg_t *in)
 }
 
 /**
+ * Request a ticket for a http url pointing to a channel or dvr
+ */
+static htsmsg_t *
+htsp_method_getTicket(htsp_connection_t *htsp, htsmsg_t *in)
+{
+  htsmsg_t *out;
+  uint32_t id;
+  char path[255];
+  const char *ticket = NULL;
+
+  if(!htsmsg_get_u32(in, "channelId", &id)) {
+    snprintf(path, sizeof(path), "/stream/channelid/%d", id);
+    ticket = access_ticket_create(path);
+  } else if(!htsmsg_get_u32(in, "dvrId", &id)) {
+    snprintf(path, sizeof(path), "/dvrfile/%d", id);
+    ticket = access_ticket_create(path);
+  } else {
+    return htsp_error("Missing argument 'channelId' or 'dvrId'");
+  }
+
+  out = htsmsg_create_map();
+
+  htsmsg_add_str(out, "path", path);
+  htsmsg_add_str(out, "ticket", ticket);
+
+  return out;
+}
+
+
+/**
  * add a Dvrentry
  */
 static htsmsg_t * 
@@ -1034,6 +1064,7 @@ struct {
   { "cancelDvrEntry", htsp_method_cancelDvrEntry, ACCESS_RECORDER},
   { "deleteDvrEntry", htsp_method_deleteDvrEntry, ACCESS_RECORDER},
   { "epgQuery", htsp_method_epgQuery, ACCESS_STREAMING},
+  { "getTicket", htsp_method_getTicket, ACCESS_STREAMING},
 
 };
 
@@ -1496,7 +1527,7 @@ const static char frametypearray[PKT_NTYPES] = {
 static void
 htsp_stream_deliver(htsp_subscription_t *hs, th_pkt_t *pkt)
 {
-  htsmsg_t *m = htsmsg_create_map(), *n;
+  htsmsg_t *m, *n;
   htsp_msg_t *hm;
   htsp_connection_t *htsp = hs->hs_htsp;
   int64_t ts;
@@ -1512,6 +1543,8 @@ htsp_stream_deliver(htsp_subscription_t *hs, th_pkt_t *pkt)
     pkt_ref_dec(pkt);
     return;
   }
+
+  m = htsmsg_create_map();
  
   htsmsg_add_str(m, "method", "muxpkt");
   htsmsg_add_u32(m, "subscriptionId", hs->hs_sid);

@@ -240,8 +240,10 @@ pvr_generate_filename(dvr_entry_t *de)
 
 
   /* */
-  if(makedirs(path) != 0)
+  if(makedirs(path) != 0) {
+    free(filename);
     return -1;
+  }
   
 
   /* Construct final name */
@@ -586,7 +588,13 @@ dvr_spawn_postproc(dvr_entry_t *de, const char *dvr_postproc)
 static void
 dvr_thread_epilog(dvr_entry_t *de)
 {
+
   dvr_config_t *cfg = dvr_config_find_by_name_default(de->de_config_name);
+
+  if(de->de_mkmux) {
+    mk_mux_close(de->de_mkmux);
+    de->de_mkmux = NULL;
+  }
 
   if(strcmp(cfg->dvr_format, "matroska") == 0) {
 	mk_mux_close(de->de_mkmux);
